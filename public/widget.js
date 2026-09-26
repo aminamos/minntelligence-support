@@ -40,6 +40,7 @@
   wrap.innerHTML = '<div id="support-panel" role="dialog" aria-label="Support chat">' +
     '<div id="support-msgs"></div>' +
     '<p id="support-hint" style="display:none;margin:0;padding:.3rem .6rem;font-size:.85rem;">Drop your email so we can reply.</p>' +
+    '<p id="support-status" style="display:none;margin:0;padding:.3rem .6rem;font-size:.85rem;font-weight:bold;"></p>' +
     '<div id="support-meta"><input id="support-name" placeholder="Name (optional)" autocomplete="name">' +
     '<input id="support-email" placeholder="Email (required)" autocomplete="email"></div>' +
     '<form id="support-form"><input id="support-input" placeholder="How can we help?" autocomplete="off">' +
@@ -91,7 +92,13 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body: text, name: name, email: email, key: key }),
       }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
-        if (d && d.id) { store(CONV, d.id); if (d.key) store(KEY, d.key); poll(); }
+        if (d && d.id) {
+          store(CONV, d.id); if (d.key) store(KEY, d.key);
+          var st = wrap.querySelector("#support-status");
+          st.textContent = "Thanks for submitting! Your ticket number is " + d.id + ".";
+          st.style.display = "block";
+          poll();
+        }
       }).catch(function () {});
     } else {
       input.value = "";
@@ -103,5 +110,10 @@
     }
   });
 
-  if (store(CONV)) poll();
+  if (store(CONV)) {
+    var st0 = wrap.querySelector("#support-status");
+    st0.textContent = "Thanks for submitting! Your ticket number is " + store(CONV) + ".";
+    st0.style.display = "block";
+    poll();
+  }
 })();
