@@ -39,8 +39,9 @@
   wrap.id = "support-bubble";
   wrap.innerHTML = '<div id="support-panel" role="dialog" aria-label="Support chat">' +
     '<div id="support-msgs"></div>' +
+    '<p id="support-hint" style="display:none;margin:0;padding:.3rem .6rem;font-size:.85rem;">Drop your email so we can reply.</p>' +
     '<div id="support-meta"><input id="support-name" placeholder="Name (optional)" autocomplete="name">' +
-    '<input id="support-email" placeholder="Email (optional)" autocomplete="email"></div>' +
+    '<input id="support-email" placeholder="Email (required)" autocomplete="email"></div>' +
     '<form id="support-form"><input id="support-input" placeholder="How can we help?" autocomplete="off">' +
     '<button id="support-send" type="submit">Send</button></form></div>' +
     '<button id="support-fab" aria-label="Open support chat">?</button>';
@@ -61,30 +62,30 @@
     msgs.scrollTop = msgs.scrollHeight;
   }
 
-  function poll() {
-    var id = store(CONV), key = store(KEY);
-    if (!id || !key) return;
-    fetch(API + "/api/conversations/" + encodeURIComponent(id) + "?key=" + encodeURIComponent(key))
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { if (d && d.messages) render(d.messages); })
-      .catch(function () {});
-  }
-
   fab.addEventListener("click", function () {
     panel.classList.toggle("open");
     if (panel.classList.contains("open")) { poll(); timer = setInterval(poll, 5000); }
     else if (timer) { clearInterval(timer); timer = null; }
   });
-
+  var emailInput = wrap.querySelector("#support-email");
+  var hint = wrap.querySelector("#support-hint");
+  try { emailInput.value = localStorage.getItem("support-email") || ""; } catch (e) {}
   form.addEventListener("submit", function (e) {
     e.preventDefault();
     var text = input.value.trim();
     if (!text) return;
-    input.value = "";
     var id = store(CONV), key = store(KEY);
     if (!id) {
       var name = wrap.querySelector("#support-name").value.trim();
-      var email = wrap.querySelector("#support-email").value.trim();
+      var email = emailInput.value.trim();
+      if (!/^\S+@\S+\.\S+$/.test(email)) {
+        hint.style.display = "block";
+        emailInput.focus();
+        return;
+      }
+      hint.style.display = "none";
+      input.value = "";
+      try { localStorage.setItem("support-email", email); } catch (err) {}
       fetch(API + "/api/conversations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -93,6 +94,7 @@
         if (d && d.id) { store(CONV, d.id); if (d.key) store(KEY, d.key); poll(); }
       }).catch(function () {});
     } else {
+      input.value = "";
       fetch(API + "/api/conversations/" + encodeURIComponent(id) + "/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

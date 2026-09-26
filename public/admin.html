@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support inbox</title>
+<style>
+body { margin:0 auto; padding:1rem; max-width:40em; font-family:"Times New Roman",Times,serif; line-height:1.4; color:#1a1a1a; background:#f4f1ea; }
+a { color:#0000ee; }
+#lock input, #reply-form input { font:inherit; padding:.3rem .5rem; border:1px solid #1a1a1a; border-radius:8px; }
+#lock button, #reply-form button, .row button { font:inherit; padding:.3rem .8rem; border:1px solid #1a1a1a; border-radius:8px; background:#fff; cursor:pointer; }
+.row { border:1px solid #1a1a1a; border-radius:8px; padding:.5rem .7rem; margin:0 0 .5rem; background:#fff; cursor:pointer; }
+.row.closed { opacity:.55; }
+#thread p { margin:0 0 .4rem; }
+#thread .agent { color:#0078bf; }
+#reply-form { display:flex; gap:.4rem; margin-top:.6rem; }
+#reply-form input { flex:1; }
+.hidden { display:none; }
+.toolbar { margin:.6rem 0; }
+.toolbar button { margin-right:.4rem; }
+</style>
+</head>
+<body>
+<h1>Support inbox</h1>
+<div id="lock">
+<p>Passcode required.</p>
+<p><input id="lock-input" type="password" placeholder="Passcode"> <button id="lock-btn">Unlock</button></p>
+<p id="lock-err"></p>
+</div>
+<div id="app" class="hidden">
+<p><button id="filter-open">Open</button> <button id="filter-closed">Closed</button> <button id="refresh">Refresh</button></p>
+<div id="list"></div>
+<div id="thread-wrap" class="hidden">
+<h2 id="thread-title"></h2>
+<div id="thread"></div>
+<form id="reply-form"><input id="reply-input" placeholder="Reply…" autocomplete="off"><button type="submit">Send</button></form>
+<p class="toolbar"><button id="close-btn">Close</button><button id="reopen-btn">Reopen</button><button id="back-btn">Back</button></p>
+</div>
+</div>
+<script>
+(function () {
+  var key = null, current = null, status = "open", timer = null;
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function api(path, opts) {
+    opts = opts || {};
+    opts.headers = { "Content-Type": "application/json", "Authorization": "Bearer " + key };
+    return fetch(path, opts).then(function (r) {
+      if (r.status === 401) { lock(); throw new Error("unauthorized"); }
+      return r.json();
+    });
+  }
+  function lock() {
+    key = null;
+    document.getElementById("app").classList.add("hidden");
+    document.getElementById("lock").classList.remove("hidden");
+    if (timer) { clearInterval(timer); timer = null; }
+  }
+  document.getElementById("lock-btn").addEventListener("click", function () {
+    key = document.getElementById("lock-input").value;
+    document.getElementById("lock-input").value = "";
+    api("/api/admin/conversations?status=open").then(function (d) {
+      document.getElementById("lock").classList.add("hidden");
+      document.getElementById("app").classList.remove("hidden");
+      renderList(d);
+      timer = setInterval(function () { if (!current) loadList(); else loadThread(current, true); }, 8000);
+    }).catch(function () {
+      document.getElementById("lock-err").textContent = "Wrong passcode.";
+      key = null;
+    });
+  });
+  function renderList(rows) {
+    var el = document.getElementById("list");
+    el.innerHTML = rows.map(function (c) {
+      var label = esc(c.subject || c.visitor_name || c.visitor_email || c.id);
+      return '<div class="row' + (c.status === "closed" ? " closed" : "") + '" data-id="' + esc(c.id) + '">' +
+        "<strong>" + label + "</strong><br><small>" + esc(c.updated_at) + " · " + esc(c.status) + "</small></div>";
+    }).join("") || "<p>No conversations.</p>";
+    el.querySelectorAll(".row").forEach(function (r) {
+      r.addEventListener("click", function () { loadThread(r.getAttribute("data-id")); });
+    });
+  }
+  function loadList() {
+    api("/api/admin/conversations?status=" + status).then(renderList).catch(function () {});
+  }
+  function loadThread(id, silent) {
+    api("/api/admin/conversations/" + encodeURIComponent(id)).then(function (d) {
+      current = id;
+      document.getElementById("list").classList.add("hidden");
+      document.getElementById("thread-wrap").classList.remove("hidden");
+      var c = d.conversation;
+      document.getElementById("thread-title").textContent = (c.subject || c.visitor_name || c.visitor_email || c.id) + " (" + c.status + ")";
+      document.getElementById("thread").innerHTML = d.messages.map(function (m) {
+        return '<p><strong class="' + esc(m.sender) + '">' + esc(m.sender) + ":</strong> " + esc(m.body) + "</p>";
+      }).join("");
+    }).catch(function () { if (!silent) lock(); });
+  }
+  document.getElementById("filter-open").addEventListener("click", function () { status = "open"; current = null;
+    document.getElementById("thread-wrap").classList.add("hidden");
+    document.getElementById("list").classList.remove("hidden"); loadList(); });
+  document.getElementById("filter-closed").addEventListener("click", function () { status = "closed"; current = null;
+    document.getElementById("thread-wrap").classList.add("hidden");
+    document.getElementById("list").classList.remove("hidden"); loadList(); });
+  document.getElementById("refresh").addEventListener("click", function () { current ? loadThread(current) : loadList(); });
+  document.getElementById("back-btn").addEventListener("click", function () { current = null;
+    document.getElementById("thread-wrap").classList.add("hidden");
+    document.getElementById("list").classList.remove("hidden"); loadList(); });
+  document.getElementById("reply-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var inp = document.getElementById("reply-input");
+    var text = inp.value.trim();
+    if (!text || !current) return;
+    inp.value = "";
+    api("/api/admin/conversations/" + encodeURIComponent(current) + "/reply", {
+      method: "POST", body: JSON.stringify({ body: text }),
+    }).then(function () { loadThread(current); }).catch(function () {});
+  });
+  document.getElementById("close-btn").addEventListener("click", function () {
+    if (!current) return;
+    api("/api/admin/conversations/" + encodeURIComponent(current) + "/close", { method: "POST" })
+      .then(function () { loadThread(current); }).catch(function () {});
+  });
+  document.getElementById("reopen-btn").addEventListener("click", function () {
+    if (!current) return;
+    api("/api/admin/conversations/" + encodeURIComponent(current) + "/reopen", { method: "POST" })
+      .then(function () { loadThread(current); }).catch(function () {});
+  });
+})();
+</script>
+</body>
+</html>
