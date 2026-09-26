@@ -153,13 +153,23 @@ export default {
         const rb = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
         const text = cleanStr(rb.body, 4000);
         if (!text) return json({ error: "Missing body" }, 400);
+        const conv = await env.DB.prepare("SELECT * FROM conversations WHERE id = ?")
+          .bind(adminConv[1]).first<ConversationRow>();
+        if (!conv) return json({ error: "Not found" }, 404);
         await env.DB.batch([
           env.DB.prepare(
             `INSERT INTO messages (id, conversation_id, sender, body, created_at) VALUES (?, ?, 'agent', ?, ?)`
           ).bind(uid("msg"), adminConv[1], text, now),
           env.DB.prepare("UPDATE conversations SET updated_at = ? WHERE id = ?").bind(now, adminConv[1]),
         ]);
-        // TODO: outbound email to visitor_email via Email Service binding.
+        if (conv.visitor_email) {
+          await env.EMAIL.send({
+            to: conv.visitor_email,
+            from: "support@minntelligence.fyi",
+            subject: `Re: ${conv.subject || "your support request"}`,
+            text: `${text}\n\n— Amin, minntelligence`,
+          }).catch(() => {});
+        }
         return json({ success: true });
       }
       if (adminConv && request.method === "POST" && (adminConv[2] === "/close" || adminConv[2] === "/reopen")) {
@@ -216,6 +226,16 @@ export default {
         `INSERT INTO messages (id, conversation_id, sender, body, created_at) VALUES (?, ?, 'visitor', ?, ?)`
       ).bind(uid("msg"), convId, snippet, now));
       await env.DB.batch(batch);
+      // Dual delivery: inbox keeps it, Gmail gets a copy (one action per
+      // Email Routing rule, so the worker forwards instead of a 2nd rule).
+      if (env.FORWARD_TO) {
+        await env.EMAIL.send({
+          to: env.FORWARD_TO,
+          from: "support@minntelligence.fyi",
+          subject: `[support] ${subject.slice(0, 150) || "new message"} (from ${senderEmail || "web"})`,
+          text: `From: ${from}\nConversation: ${convId}\n\n${snippet}`,
+        }).catch(() => {});
+      }
     } catch {
       // Never bounce on parse failures.
     }

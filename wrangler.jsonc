@@ -31,5 +31,10 @@
       "binding": "FILES",
       "bucket_name": "support-inbox-files"
     }
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
   ]
 }
